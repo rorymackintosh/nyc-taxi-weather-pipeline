@@ -1,0 +1,100 @@
+# =============================================================================
+# Docker Compose for local Apache Airflow development
+# =============================================================================
+# Usage:
+#   docker-compose up -d
+#   Open http://localhost:8080  (user: airflow / pass: airflow)
+# =============================================================================
+
+version: "3.8"
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.4-python3.11
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    # Pass through our pipeline env vars
+    SOCRATA_APP_TOKEN: ${SOCRATA_APP_TOKEN:-}
+    SOCRATA_DOMAIN: ${SOCRATA_DOMAIN:-data.cityofnewyork.us}
+    TAXI_DATASET_ID: ${TAXI_DATASET_ID:-m6nq-qud6}
+    NOAA_API_TOKEN: ${NOAA_API_TOKEN:-}
+    NOAA_STATION_ID: ${NOAA_STATION_ID:-GHCND:USW00094728}
+    GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
+    GCS_BUCKET_NAME: ${GCS_BUCKET_NAME:-nyc-taxi-weather-pipeline}
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/keys/service-account-key.json
+    MONGO_URI: ${MONGO_URI:-}
+    MONGO_DB_NAME: ${MONGO_DB_NAME:-nyc_taxi_weather}
+    DATA_START_DATE: ${DATA_START_DATE:-2024-01-01}
+    DATA_END_DATE: ${DATA_END_DATE:-2024-12-31}
+    TAXI_FETCH_LIMIT: ${TAXI_FETCH_LIMIT:-50000}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./config:/opt/airflow/config
+    - ./scripts:/opt/airflow/scripts
+    - ./logs:/opt/airflow/logs
+    # Mount your GCP service account key here
+    # - ./keys:/opt/airflow/keys
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv &&
+        airflow db init &&
+        airflow users create \
+          --username airflow \
+          --firstname Airflow \
+          --lastname Admin \
+          --role Admin \
+          --email admin@example.com \
+          --password airflow
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: >
+      bash -c "pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv &&
+               airflow webserver --port 8080"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: >
+      bash -c "pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv &&
+               airflow scheduler"
+    restart: always
+
+volumes:
+  postgres-data:

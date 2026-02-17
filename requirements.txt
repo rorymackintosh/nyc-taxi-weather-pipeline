@@ -1,0 +1,29 @@
+# =============================================================================
+# NYC Taxi & Weather Pipeline - Python Dependencies
+# =============================================================================
+
+# Airflow
+apache-airflow==2.10.4
+apache-airflow-providers-google==10.25.0
+apache-airflow-providers-mongo==4.2.3
+
+# Data APIs
+sodapy==2.2.0
+requests==2.32.3
+
+# Google Cloud
+google-cloud-storage==2.19.0
+
+# MongoDB
+pymongo==4.10.1
+pymongo[srv]
+
+# Data Processing
+pandas==2.2.3
+pyarrow==18.1.0
+
+# PySpark (for Phase 3)
+pyspark==3.5.4
+
+# Utilities
+python-dotenv==1.0.1

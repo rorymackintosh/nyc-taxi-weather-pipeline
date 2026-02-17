@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Airflow
+airflow.db
+airflow.cfg
+airflow-webserver.pid
+logs/
+*.log
+
+# Data files (don't commit large data)
+data/
+*.csv
+*.json
+!docker-compose.yaml
+
+# GCP credentials
+*.json
+!package.json
+service-account-key.json
