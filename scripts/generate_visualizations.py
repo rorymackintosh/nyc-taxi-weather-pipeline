@@ -109,10 +109,11 @@ def plot_temp_vs_tip(df):
         ax.scatter(subset["TMAX"], subset["avg_tip_pct"], s=60, alpha=0.75,
                    color=WEATHER_COLORS.get(cond, "gray"), label=cond, edgecolors="white", linewidth=0.8)
 
-    z = np.polyfit(daily["TMAX"], daily["avg_tip_pct"], 2)
+    z = np.polyfit(daily["TMAX"], daily["avg_tip_pct"], 1)
     p = np.poly1d(z)
     x_line = np.linspace(daily["TMAX"].min(), daily["TMAX"].max(), 100)
-    ax.plot(x_line, p(x_line), color="black", linewidth=2, linestyle="--", alpha=0.6, label="Trend")
+    ax.plot(x_line, p(x_line), color="black", linewidth=2, linestyle="--", alpha=0.6,
+            label=f"Linear Trend (slope={z[0]:.3f})")
 
     ax.set_xlabel("Daily Max Temperature (°F)")
     ax.set_ylabel("Average Tip Percentage (%)")
@@ -149,8 +150,10 @@ def plot_hourly_by_weather(df):
     ax.set_xlabel("Hour of Day")
     ax.set_ylabel("Average Tip Percentage (%)")
     ax.set_title("Hourly Tipping Patterns by Weather Condition")
-    ax.set_xticks(range(0, 24))
-    ax.set_xticklabels([f"{h}:00" for h in range(24)], rotation=45, ha="right")
+    # Only label hours we actually have data for
+    sampled_hours = sorted(hourly["pickup_hour"].unique())
+    ax.set_xticks(sampled_hours)
+    ax.set_xticklabels([f"{h}:00" for h in sampled_hours], rotation=45, ha="right")
     ax.legend(title="Weather")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "02_hourly_tip_by_weather.png"), dpi=150)
@@ -281,14 +284,15 @@ def plot_distance_by_weather(df):
         med = subset.median()
         mean = subset.mean()
         n = len(subset)
-        ax.text(i + 1, med + 0.3, f"median: {med:.1f} mi", ha="center", fontsize=8, fontweight="bold")
-        ax.text(i + 1, mean + 0.8, f"mean: {mean:.1f} mi", ha="center", fontsize=8, color="blue")
-        ax.text(i + 1, -1.5, f"n={n:,}", ha="center", fontsize=8, color="gray")
+        q75 = subset.quantile(0.75)
+        ax.text(i + 1, med + 0.2, f"median: {med:.1f} mi", ha="center", fontsize=8, fontweight="bold")
+        ax.text(i + 1, q75 + 1.0, f"mean: {mean:.1f} mi", ha="center", fontsize=8, color="blue")
+        ax.text(i + 1, 16.5, f"n={n:,}", ha="center", fontsize=8, color="gray")
 
     ax.set_xlabel("Weather Condition")
     ax.set_ylabel("Trip Distance (miles)")
     ax.set_title("Trip Distance Distribution by Weather")
-    ax.set_ylim(-2.5, 25)
+    ax.set_ylim(0, 18)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "05_distance_by_weather.png"), dpi=150)
     plt.close(fig)
@@ -307,8 +311,8 @@ def plot_weekend_weekday(df):
         count=("tip_pct", "size"),
     ).reset_index()
 
-    # Only keep groups with at least 50 data points
-    agg = agg[agg["count"] >= 50]
+    # Only keep groups with at least 20 data points
+    agg = agg[agg["count"] >= 20]
 
     order = get_weather_order(cc)
     # Only keep conditions that have both weekday AND weekend data
@@ -362,29 +366,28 @@ def plot_weekend_weekday(df):
 # VIZ 7: Trip Volume Heatmap (Hour x Day of Week) - full 0-23
 # =========================================================================
 def plot_trip_heatmap(df):
-    day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    """Only show the sampled hours (no blank/zero columns)."""
+    # We only sample Wed and Sat, so only those days have data
+    day_order = ["Wednesday", "Saturday"]
 
     pivot = df.pivot_table(
         index="day_name", columns="pickup_hour",
         values="fare_amount", aggfunc="count",
     ).reindex(day_order)
 
-    # Ensure all 24 hours are represented
-    for h in range(24):
-        if h not in pivot.columns:
-            pivot[h] = 0
-    pivot = pivot[sorted(pivot.columns)]
+    # Keep only hours that have data
+    pivot = pivot.loc[:, pivot.sum() > 0]
 
-    fig, ax = plt.subplots(figsize=(16, 5))
+    fig, ax = plt.subplots(figsize=(12, 4))
     sns.heatmap(
         pivot, cmap="YlOrRd", annot=True, fmt=".0f",
         linewidths=0.5, ax=ax, cbar_kws={"label": "Trip Count"},
-        annot_kws={"size": 7},
+        annot_kws={"size": 9},
     )
     ax.set_xlabel("Hour of Day")
     ax.set_ylabel("")
-    ax.set_xticklabels([f"{h}" for h in range(24)])
-    ax.set_title("Trip Volume Heatmap: Day of Week x Hour of Day")
+    ax.set_xticklabels([f"{int(h)}:00" for h in pivot.columns])
+    ax.set_title("Trip Volume: Weekday (Wed) vs. Weekend (Sat) by Hour")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "07_trip_heatmap.png"), dpi=150)
     plt.close(fig)
@@ -418,13 +421,14 @@ def plot_fare_premium(df):
         ax.annotate(
             f"${row.avg_fare_per_mile:.2f}/mi\n({row.count:,} trips)\navg dist: {row.avg_distance:.1f} mi",
             xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
-            xytext=(0, 8), textcoords="offset points", ha="center", fontsize=9,
+            xytext=(0, 6), textcoords="offset points", ha="center", fontsize=8,
         )
 
     ax.set_xlabel("Weather Condition")
     ax.set_ylabel("Average Fare per Mile ($)")
-    ax.set_title("Fare Per Mile by Weather Condition")
-    ax.set_ylim(bottom=0)
+    ax.set_title("Fare Per Mile by Weather Condition", pad=20)
+    max_val = agg["avg_fare_per_mile"].max()
+    ax.set_ylim(bottom=0, top=max_val * 1.35)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT_DIR, "08_fare_premium.png"), dpi=150)
     plt.close(fig)
@@ -456,6 +460,55 @@ def main():
     plot_fare_premium(df)
 
     print(f"\nAll charts saved to: {os.path.abspath(OUT_DIR)}/")
+
+    # =====================================================================
+    # KEY STATS SUMMARY
+    # =====================================================================
+    cc = df[(df["tip_pct"].notna())].copy()
+
+    print("\n" + "=" * 70)
+    print("KEY STATISTICS SUMMARY")
+    print("=" * 70)
+
+    print(f"\nTotal records: {len(df):,}")
+    print(f"Credit card trips (with tip data): {len(cc):,}")
+    print(f"Unique dates sampled: {df['pickup_date'].nunique()}")
+    print(f"Date range: {df['pickup_date'].min().date()} to {df['pickup_date'].max().date()}")
+
+    print(f"\n--- Average Tip % by Weather Condition ---")
+    tip_by_weather = cc.groupby("weather_condition").agg(
+        avg_tip_pct=("tip_pct", "mean"),
+        median_tip_pct=("tip_pct", "median"),
+        avg_tip_amt=("tip_amount", "mean"),
+        avg_fare=("fare_amount", "mean"),
+        avg_distance=("trip_distance", "mean"),
+        trip_count=("tip_pct", "size"),
+    ).round(2)
+    print(tip_by_weather.to_string())
+
+    print(f"\n--- Average Tip % by Hour ---")
+    tip_by_hour = cc.groupby("pickup_hour").agg(
+        avg_tip_pct=("tip_pct", "mean"),
+        trip_count=("tip_pct", "size"),
+    ).round(2)
+    print(tip_by_hour.to_string())
+
+    print(f"\n--- Average Tip % by Month ---")
+    tip_by_month = cc.groupby("month").agg(
+        avg_tip_pct=("tip_pct", "mean"),
+        trip_count=("tip_pct", "size"),
+    ).round(2)
+    print(tip_by_month.to_string())
+
+    print(f"\n--- Weekday vs Weekend ---")
+    cc["period"] = cc["is_weekend"].map({True: "Weekend (Sat)", False: "Weekday (Wed)"})
+    tip_by_period = cc.groupby("period").agg(
+        avg_tip_pct=("tip_pct", "mean"),
+        trip_count=("tip_pct", "size"),
+    ).round(2)
+    print(tip_by_period.to_string())
+
+    print("\n" + "=" * 70)
 
 
 if __name__ == "__main__":

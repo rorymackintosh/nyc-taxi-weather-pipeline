@@ -1,12 +1,12 @@
 """
 Fetch NYC Yellow Taxi trip data from the Socrata Open Data API.
 
-Uses the sodapy library to paginate through the NYC TLC dataset.
-The data is returned as a list of dicts (JSON records).
+Uses the sodapy library to pull data spread across the full year with
+coverage of all 24 hours.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import pandas as pd
@@ -30,50 +30,57 @@ def fetch_taxi_data(
     limit: Optional[int] = None,
 ) -> pd.DataFrame:
     """
-    Fetch Yellow Taxi trip records spread across the full date range.
+    Fetch Yellow Taxi trip records spread across every week of the year,
+    with coverage of all 24 hours.
 
-    Samples from 4 different days per month (1st, 8th, 15th, 22nd) to
-    ensure coverage of all hours, diverse weather conditions, and
-    weekday/weekend representation.
+    Strategy: pick 2 days per week (52 weeks = 104 sample days).
+    For each day, fetch from 4 explicit hour ranges (morning, midday,
+    evening, night) to guarantee full 0-23 hour coverage.
 
     Args:
-        start_date: Inclusive start date (YYYY-MM-DD).
-        end_date:   Inclusive end date   (YYYY-MM-DD).
-        limit:      Max total rows to fetch.  None -> TAXI_FETCH_LIMIT from config.
+        start_date: Inclusive start (YYYY-MM-DD).
+        end_date:   Inclusive end   (YYYY-MM-DD).
+        limit:      Max total rows. Default from config.
 
     Returns:
         pandas DataFrame with taxi trip records.
     """
-    from datetime import timedelta
-
     limit = limit or TAXI_FETCH_LIMIT
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-    # Build sample days: 4 days per month (1st, 8th, 15th, 22nd)
-    sample_days = [1, 8, 15, 22]
-    date_ranges = []
-    current = start_dt.replace(day=1)
-    while current < end_dt:
-        for day in sample_days:
-            try:
-                day_start = current.replace(day=day)
-            except ValueError:
-                continue
-            if day_start < start_dt or day_start > end_dt:
-                continue
-            day_end = day_start + timedelta(days=1)
-            date_ranges.append((day_start, day_end))
+    # Pick 2 days per week: Wednesday (weekday) and Saturday (weekend)
+    sample_days = []
+    current = start_dt
+    while current <= end_dt:
+        weekday = current.weekday()
+        if weekday == 2:  # Wednesday
+            sample_days.append(current)
+        elif weekday == 5:  # Saturday
+            sample_days.append(current)
+        current += timedelta(days=1)
 
-        if current.month == 12:
-            current = current.replace(year=current.year + 1, month=1, day=1)
-        else:
-            current = current.replace(month=current.month + 1, day=1)
+    # 8 specific 1-hour windows spread across 24h to guarantee
+    # full hour coverage. Each window spans exactly 1 hour.
+    hour_ranges = [
+        ("00:00:00", "01:00:00"),  # hour 0
+        ("03:00:00", "04:00:00"),  # hour 3
+        ("06:00:00", "07:00:00"),  # hour 6
+        ("09:00:00", "10:00:00"),  # hour 9
+        ("12:00:00", "13:00:00"),  # hour 12
+        ("15:00:00", "16:00:00"),  # hour 15
+        ("18:00:00", "19:00:00"),  # hour 18
+        ("21:00:00", "22:00:00"),  # hour 21
+    ]
 
-    per_day = max(limit // len(date_ranges), 200)
+    total_slots = len(sample_days) * len(hour_ranges)
+    per_slot = max(limit // total_slots, 20)
+
     logger.info(
-        "Fetching ~%d records/day across %d sample days (%s to %s), total target: %d",
-        per_day, len(date_ranges), start_date, end_date, limit,
+        "Fetching ~%d records per slot, %d sample days x %d hour ranges = %d slots, "
+        "target: %d total records (%s to %s)",
+        per_slot, len(sample_days), len(hour_ranges), total_slots,
+        limit, start_date, end_date,
     )
 
     client = Socrata(
@@ -90,44 +97,37 @@ def fetch_taxi_data(
     )
 
     all_records = []
+    errors = 0
 
-    # For each sample day, fetch from 6 different offsets to cover all hours.
-    # NYC has ~300K-400K taxi trips/day. Offsets spaced ~50K apart jump
-    # roughly 3-4 hours through the day, giving us coverage of 0-23h.
-    offsets = [0, 50000, 100000, 150000, 200000, 250000]
-    per_offset = max(per_day // len(offsets), 50)
-
-    for day_start, day_end in date_ranges:
-        ds = day_start.strftime("%Y-%m-%dT00:00:00")
-        de = day_end.strftime("%Y-%m-%dT00:00:00")
-        day_str = day_start.strftime("%Y-%m-%d")
+    for day in sample_days:
+        day_str = day.strftime("%Y-%m-%d")
         day_total = 0
 
-        where_clause = (
-            f"tpep_pickup_datetime >= '{ds}' "
-            f"AND tpep_pickup_datetime < '{de}'"
-        )
-
-        for ofs in offsets:
+        for h_start, h_end in hour_ranges:
+            where_clause = (
+                f"tpep_pickup_datetime >= '{day_str}T{h_start}' "
+                f"AND tpep_pickup_datetime < '{day_str}T{h_end}'"
+            )
             try:
                 results = client.get(
                     TAXI_DATASET_ID,
                     where=where_clause,
                     select=select_fields,
-                    limit=per_offset,
-                    offset=ofs,
-                    order="tpep_pickup_datetime ASC",
+                    limit=per_slot,
                 )
                 if results:
                     all_records.extend(results)
                     day_total += len(results)
             except Exception as e:
-                logger.error("    Error fetching %s offset %d: %s", day_str, ofs, e)
+                errors += 1
+                if errors <= 3:
+                    logger.error("  Error fetching %s %s: %s", day_str, h_start, e)
 
-        logger.info("  %s: %d records (6 offsets across the day)", day_str, day_total)
+        if day_total > 0:
+            logger.info("  %s (%s): %d records", day_str, day.strftime("%a"), day_total)
 
     client.close()
-    logger.info("Fetched %d total taxi records.", len(all_records))
+    logger.info("Fetched %d total taxi records (%d errors).", len(all_records), errors)
 
     df = pd.DataFrame(all_records)
     if not df.empty:
@@ -161,6 +161,9 @@ def _clean_taxi_df(df: pd.DataFrame) -> pd.DataFrame:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    df = fetch_taxi_data("2024-01-01", "2024-01-07", limit=1000)
+    df = fetch_taxi_data("2023-01-01", "2023-01-31", limit=2000)
     print(df.head())
     print(f"Shape: {df.shape}")
+    print(f"Unique dates: {df['pickup_date'].nunique()}")
+    print(f"Hour range: {df['pickup_hour'].min()} - {df['pickup_hour'].max()}")
+    print(f"Hour distribution:\n{df['pickup_hour'].value_counts().sort_index()}")
