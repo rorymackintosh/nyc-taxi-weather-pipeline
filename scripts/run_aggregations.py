@@ -20,7 +20,7 @@ from dags.utils.mongo_helpers import (
     create_hourly_trip_stats,
     get_database,
 )
-from config.settings import TAXI_COLLECTION, WEATHER_COLLECTION
+from config.settings import TAXI_COLLECTION, WEATHER_COLLECTION, ENRICHED_COLLECTION
 
 logging.basicConfig(
     level=logging.INFO,
@@ -72,6 +72,10 @@ def main():
     hourly_count = create_hourly_trip_stats()
     logger.info("Result: %d hourly stat documents\n", hourly_count)
 
+    # Drop enriched_trips to free MongoDB storage (aggregates are materialized)
+    logger.info("Dropping enriched_trips to free MongoDB storage...")
+    db[ENRICHED_COLLECTION].drop()
+    logger.info("enriched_trips dropped. Aggregates preserved.")
     logger.info("All aggregations complete!")
 
 

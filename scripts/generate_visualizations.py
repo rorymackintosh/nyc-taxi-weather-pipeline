@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import seaborn as sns
 from dags.utils.mongo_helpers import get_database
-from config.settings import ENRICHED_COLLECTION, WEATHER_COLLECTION
+from config.settings import TAXI_COLLECTION, WEATHER_COLLECTION
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "outputs")
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -40,9 +40,14 @@ WEATHER_COLORS = {
 
 
 def load_enriched_data() -> pd.DataFrame:
-    """Pull enriched_trips from MongoDB into a DataFrame."""
+    """
+    Pull taxi_trips and weather_daily from MongoDB,
+    join them in pandas on pickup_date = DATE.
+    """
     db = get_database()
-    cursor = db[ENRICHED_COLLECTION].find(
+
+    # Load taxi trips
+    taxi_cursor = db[TAXI_COLLECTION].find(
         {},
         {
             "_id": 0,
@@ -55,15 +60,18 @@ def load_enriched_data() -> pd.DataFrame:
             "total_amount": 1,
             "passenger_count": 1,
             "payment_type": 1,
-            "PRCP": 1,
-            "SNOW": 1,
-            "SNWD": 1,
-            "TMAX": 1,
-            "TMIN": 1,
-            "weather_condition": 1,
         },
     )
-    df = pd.DataFrame(list(cursor))
+    df = pd.DataFrame(list(taxi_cursor))
+
+    # Load weather
+    wx_cursor = db[WEATHER_COLLECTION].find({}, {"_id": 0})
+    wx = pd.DataFrame(list(wx_cursor))
+
+    # Join on date
+    df = df.merge(wx, left_on="pickup_date", right_on="DATE", how="left")
+    df.drop(columns=["DATE"], inplace=True, errors="ignore")
+
     df["tpep_pickup_datetime"] = pd.to_datetime(df["tpep_pickup_datetime"])
     df["pickup_date"] = pd.to_datetime(df["pickup_date"])
     df["month"] = df["pickup_date"].dt.month

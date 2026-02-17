@@ -53,7 +53,7 @@ def run_all_queries():
     print("\n" + "=" * 70)
     print("QUERY 1: Count documents in each collection")
     print("=" * 70)
-    for coll_name in [TAXI_COLLECTION, WEATHER_COLLECTION, ENRICHED_COLLECTION,
+    for coll_name in [TAXI_COLLECTION, WEATHER_COLLECTION,
                       TIP_WEATHER_AGG_COLLECTION, HOURLY_STATS_COLLECTION]:
         count = db[coll_name].count_documents({})
         print(f"  {coll_name}: {count:,} documents")
@@ -128,18 +128,24 @@ def run_all_queries():
 
     # -------------------------------------------------------------------------
     print("\n" + "=" * 70)
-    print("QUERY 8: Enriched trips on snowy days (sample 5)")
+    print("QUERY 8: Taxi trips on snowy days (via $lookup with weather)")
     print("=" * 70)
-    for doc in db[ENRICHED_COLLECTION].find(
-        {"weather_condition": "Snow"},
-        {"_id": 0, "pickup_date": 1, "trip_distance": 1,
-         "fare_amount": 1, "tip_amount": 1, "SNOW": 1},
-    ).limit(5):
+    pipeline = [
+        {"$match": {"pickup_date": {"$in": ["2023-02-01", "2023-02-27", "2023-02-28", "2023-03-07"]}}},
+        {"$lookup": {"from": WEATHER_COLLECTION, "localField": "pickup_date",
+                     "foreignField": "DATE", "as": "wx"}},
+        {"$unwind": "$wx"},
+        {"$match": {"wx.SNOW": {"$gt": 0}}},
+        {"$project": {"_id": 0, "pickup_date": 1, "trip_distance": 1,
+                      "fare_amount": 1, "tip_amount": 1, "SNOW": "$wx.SNOW"}},
+        {"$limit": 5},
+    ]
+    for doc in db[TAXI_COLLECTION].aggregate(pipeline):
         print(pp(doc))
 
     # -------------------------------------------------------------------------
     print("\n" + "=" * 70)
-    print("QUERY 9: Average tip by hour during rainy weather")
+    print("QUERY 9: Average tip by hour during rainy weather (from hourly_trip_stats)")
     print("=" * 70)
     for doc in db[HOURLY_STATS_COLLECTION].find(
         {"weather_condition": {"$in": ["Light Rain", "Heavy Rain"]}},
@@ -149,33 +155,13 @@ def run_all_queries():
 
     # -------------------------------------------------------------------------
     print("\n" + "=" * 70)
-    print("QUERY 10: Compare avg tip: Clear vs Snow vs Rain (enriched_trips)")
+    print("QUERY 10: Compare avg tip by weather (from tip_by_weather aggregate)")
     print("=" * 70)
-    pipeline = [
-        {
-            "$match": {
-                "payment_type": 1,
-                "fare_amount": {"$gt": 0},
-                "weather_condition": {"$in": ["Clear/Normal", "Snow", "Light Rain", "Heavy Rain"]},
-            }
-        },
-        {
-            "$group": {
-                "_id": "$weather_condition",
-                "avg_tip_pct": {
-                    "$avg": {
-                        "$multiply": [
-                            {"$divide": ["$tip_amount", "$fare_amount"]},
-                            100,
-                        ]
-                    }
-                },
-                "count": {"$sum": 1},
-            }
-        },
-        {"$sort": {"count": -1}},
-    ]
-    for doc in db[ENRICHED_COLLECTION].aggregate(pipeline):
+    for doc in db[TIP_WEATHER_AGG_COLLECTION].find(
+        {},
+        {"_id": 0, "weather_condition": 1, "avg_tip_percentage": 1,
+         "avg_tip_amount": 1, "total_trips": 1},
+    ).sort("total_trips", -1):
         print(pp(doc))
 
     print("\n" + "=" * 70)

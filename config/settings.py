@@ -10,11 +10,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # =============================================================================
-# Socrata API (NYC Open Data - Taxi Trips)
+# NYC TLC Taxi Data (Bulk Parquet Downloads)
 # =============================================================================
-SOCRATA_APP_TOKEN = os.getenv("SOCRATA_APP_TOKEN", "")
-SOCRATA_DOMAIN = os.getenv("SOCRATA_DOMAIN", "data.cityofnewyork.us")
-TAXI_DATASET_ID = os.getenv("TAXI_DATASET_ID", "m6nq-qud6")
+TLC_BASE_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data/"
+TAXI_YEAR = int(os.getenv("TAXI_YEAR", "2023"))
 
 # =============================================================================
 # NOAA CDO API (Weather Data)
@@ -38,6 +37,9 @@ GCS_RAW_WEATHER_PREFIX = os.getenv("GCS_RAW_WEATHER_PREFIX", "raw-weather/")
 MONGO_URI = os.getenv("MONGO_URI", "")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "nyc_taxi_weather")
 
+# How many taxi records to sample for MongoDB (free tier = 512 MB)
+MONGO_SAMPLE_SIZE = int(os.getenv("MONGO_SAMPLE_SIZE", "700000"))
+
 # Collection names
 TAXI_COLLECTION = "taxi_trips"
 WEATHER_COLLECTION = "weather_daily"
@@ -48,9 +50,8 @@ HOURLY_STATS_COLLECTION = "hourly_trip_stats"
 # =============================================================================
 # Data Parameters
 # =============================================================================
-DATA_START_DATE = os.getenv("DATA_START_DATE", "2024-01-01")
-DATA_END_DATE = os.getenv("DATA_END_DATE", "2024-12-31")
-TAXI_FETCH_LIMIT = int(os.getenv("TAXI_FETCH_LIMIT", "50000"))
+DATA_START_DATE = os.getenv("DATA_START_DATE", "2023-01-01")
+DATA_END_DATE = os.getenv("DATA_END_DATE", "2023-12-31")
 
 # Weather data types to fetch from NOAA
 WEATHER_DATATYPES = ["PRCP", "SNOW", "SNWD", "TMAX", "TMIN"]

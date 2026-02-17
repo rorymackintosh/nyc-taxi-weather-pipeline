@@ -180,10 +180,9 @@ def create_enriched_trips() -> int:
     count = db[ENRICHED_COLLECTION].count_documents({})
     logger.info("Enriched trips collection now has %d documents.", count)
 
-    # Indexes for downstream queries
-    db[ENRICHED_COLLECTION].create_index("pickup_date")
-    db[ENRICHED_COLLECTION].create_index("weather_condition")
-    db[ENRICHED_COLLECTION].create_index("pickup_hour")
+    # Skip index creation on enriched_trips to conserve MongoDB free tier
+    # storage. The downstream aggregation pipelines scan the full collection
+    # anyway, so indexes are not needed for correctness.
 
     client.close()
     return count

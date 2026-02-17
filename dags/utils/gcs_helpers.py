@@ -84,6 +84,31 @@ def download_df_from_gcs(
     return df
 
 
+def upload_file_to_gcs(
+    local_path: str,
+    destination_blob: str,
+) -> str:
+    """
+    Upload a local file (e.g. Parquet) directly to a GCS blob.
+
+    Args:
+        local_path:       Path to the local file.
+        destination_blob: Full blob path in the bucket.
+
+    Returns:
+        GCS URI string (gs://bucket/blob).
+    """
+    client = get_gcs_client()
+    bucket = client.bucket(GCS_BUCKET_NAME)
+    blob = bucket.blob(destination_blob)
+
+    blob.upload_from_filename(local_path)
+    gcs_uri = f"gs://{GCS_BUCKET_NAME}/{destination_blob}"
+    size_mb = os.path.getsize(local_path) / (1024 * 1024)
+    logger.info("Uploaded %s (%.1f MB) to %s", local_path, size_mb, gcs_uri)
+    return gcs_uri
+
+
 def list_blobs(prefix: str) -> list[str]:
     """List all blob names under a given prefix."""
     client = get_gcs_client()
