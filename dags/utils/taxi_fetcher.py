@@ -30,31 +30,46 @@ def fetch_taxi_data(
     limit: Optional[int] = None,
 ) -> pd.DataFrame:
     """
-    Fetch Yellow Taxi trip records between start_date and end_date.
+    Fetch Yellow Taxi trip records spread across the full date range.
+
+    Samples evenly across each month to ensure weather diversity
+    in the joined dataset.
 
     Args:
         start_date: Inclusive start date (YYYY-MM-DD).
         end_date:   Inclusive end date   (YYYY-MM-DD).
-        limit:      Max rows to fetch.  None → TAXI_FETCH_LIMIT from config.
+        limit:      Max total rows to fetch.  None → TAXI_FETCH_LIMIT from config.
 
     Returns:
         pandas DataFrame with taxi trip records.
     """
     limit = limit or TAXI_FETCH_LIMIT
+
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+
+    # Build monthly date ranges for even sampling across the year
+    months = []
+    current = start_dt.replace(day=1)
+    while current < end_dt:
+        if current.month == 12:
+            next_month = current.replace(year=current.year + 1, month=1, day=1)
+        else:
+            next_month = current.replace(month=current.month + 1, day=1)
+        month_end = min(next_month, end_dt)
+        months.append((current, month_end))
+        current = next_month
+
+    per_month = max(limit // len(months), 500)
     logger.info(
-        "Fetching up to %d taxi records from %s to %s",
-        limit, start_date, end_date,
+        "Fetching ~%d taxi records/month across %d months (%s to %s), total target: %d",
+        per_month, len(months), start_date, end_date, limit,
     )
 
     client = Socrata(
         SOCRATA_DOMAIN,
         SOCRATA_APP_TOKEN,
-        timeout=60,
-    )
-
-    where_clause = (
-        f"tpep_pickup_datetime >= '{start_date}T00:00:00' "
-        f"AND tpep_pickup_datetime < '{end_date}T23:59:59'"
+        timeout=120,
     )
 
     select_fields = (
@@ -65,32 +80,32 @@ def fetch_taxi_data(
     )
 
     all_records = []
-    offset = 0
-    batch_size = min(limit, 50000)
 
-    while offset < limit:
-        fetch_count = min(batch_size, limit - offset)
-        logger.info("  Fetching batch at offset=%d, count=%d", offset, fetch_count)
+    for month_start, month_end in months:
+        ms = month_start.strftime("%Y-%m-%dT00:00:00")
+        me = month_end.strftime("%Y-%m-%dT00:00:00")
 
-        results = client.get(
-            TAXI_DATASET_ID,
-            where=where_clause,
-            select=select_fields,
-            limit=fetch_count,
-            offset=offset,
-            order="tpep_pickup_datetime ASC",
+        where_clause = (
+            f"tpep_pickup_datetime >= '{ms}' "
+            f"AND tpep_pickup_datetime < '{me}'"
         )
 
-        if not results:
-            logger.info("  No more records returned. Done.")
-            break
+        logger.info("  Fetching %d records for %s ...", per_month, month_start.strftime("%Y-%m"))
 
-        all_records.extend(results)
-        offset += len(results)
-
-        if len(results) < fetch_count:
-            logger.info("  Received fewer rows than requested. Done.")
-            break
+        try:
+            results = client.get(
+                TAXI_DATASET_ID,
+                where=where_clause,
+                select=select_fields,
+                limit=per_month,
+            )
+            if results:
+                all_records.extend(results)
+                logger.info("    Got %d records", len(results))
+            else:
+                logger.warning("    No records returned for %s", month_start.strftime("%Y-%m"))
+        except Exception as e:
+            logger.error("    Error fetching %s: %s", month_start.strftime("%Y-%m"), e)
 
     client.close()
     logger.info("Fetched %d total taxi records.", len(all_records))

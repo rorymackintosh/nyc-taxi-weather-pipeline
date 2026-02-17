@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 from pymongo import MongoClient, UpdateOne
 from pymongo.errors import BulkWriteError
+from pymongo.server_api import ServerApi
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -32,8 +33,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def get_mongo_client() -> MongoClient:
-    """Return a MongoClient connected to Atlas."""
-    return MongoClient(MONGO_URI)
+    """Return a MongoClient connected to Atlas with Stable API v1."""
+    return MongoClient(MONGO_URI, server_api=ServerApi('1'))
 
 
 def get_database(client: Optional[MongoClient] = None):
