@@ -32,38 +32,48 @@ def fetch_taxi_data(
     """
     Fetch Yellow Taxi trip records spread across the full date range.
 
-    Samples evenly across each month to ensure weather diversity
-    in the joined dataset.
+    Samples from 4 different days per month (1st, 8th, 15th, 22nd) to
+    ensure coverage of all hours, diverse weather conditions, and
+    weekday/weekend representation.
 
     Args:
         start_date: Inclusive start date (YYYY-MM-DD).
         end_date:   Inclusive end date   (YYYY-MM-DD).
-        limit:      Max total rows to fetch.  None → TAXI_FETCH_LIMIT from config.
+        limit:      Max total rows to fetch.  None -> TAXI_FETCH_LIMIT from config.
 
     Returns:
         pandas DataFrame with taxi trip records.
     """
-    limit = limit or TAXI_FETCH_LIMIT
+    from datetime import timedelta
 
+    limit = limit or TAXI_FETCH_LIMIT
     start_dt = datetime.strptime(start_date, "%Y-%m-%d")
     end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-    # Build monthly date ranges for even sampling across the year
-    months = []
+    # Build sample days: 4 days per month (1st, 8th, 15th, 22nd)
+    sample_days = [1, 8, 15, 22]
+    date_ranges = []
     current = start_dt.replace(day=1)
     while current < end_dt:
-        if current.month == 12:
-            next_month = current.replace(year=current.year + 1, month=1, day=1)
-        else:
-            next_month = current.replace(month=current.month + 1, day=1)
-        month_end = min(next_month, end_dt)
-        months.append((current, month_end))
-        current = next_month
+        for day in sample_days:
+            try:
+                day_start = current.replace(day=day)
+            except ValueError:
+                continue
+            if day_start < start_dt or day_start > end_dt:
+                continue
+            day_end = day_start + timedelta(days=1)
+            date_ranges.append((day_start, day_end))
 
-    per_month = max(limit // len(months), 500)
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1, day=1)
+        else:
+            current = current.replace(month=current.month + 1, day=1)
+
+    per_day = max(limit // len(date_ranges), 200)
     logger.info(
-        "Fetching ~%d taxi records/month across %d months (%s to %s), total target: %d",
-        per_month, len(months), start_date, end_date, limit,
+        "Fetching ~%d records/day across %d sample days (%s to %s), total target: %d",
+        per_day, len(date_ranges), start_date, end_date, limit,
     )
 
     client = Socrata(
@@ -81,31 +91,40 @@ def fetch_taxi_data(
 
     all_records = []
 
-    for month_start, month_end in months:
-        ms = month_start.strftime("%Y-%m-%dT00:00:00")
-        me = month_end.strftime("%Y-%m-%dT00:00:00")
+    # For each sample day, fetch from 6 different offsets to cover all hours.
+    # NYC has ~300K-400K taxi trips/day. Offsets spaced ~50K apart jump
+    # roughly 3-4 hours through the day, giving us coverage of 0-23h.
+    offsets = [0, 50000, 100000, 150000, 200000, 250000]
+    per_offset = max(per_day // len(offsets), 50)
+
+    for day_start, day_end in date_ranges:
+        ds = day_start.strftime("%Y-%m-%dT00:00:00")
+        de = day_end.strftime("%Y-%m-%dT00:00:00")
+        day_str = day_start.strftime("%Y-%m-%d")
+        day_total = 0
 
         where_clause = (
-            f"tpep_pickup_datetime >= '{ms}' "
-            f"AND tpep_pickup_datetime < '{me}'"
+            f"tpep_pickup_datetime >= '{ds}' "
+            f"AND tpep_pickup_datetime < '{de}'"
         )
 
-        logger.info("  Fetching %d records for %s ...", per_month, month_start.strftime("%Y-%m"))
+        for ofs in offsets:
+            try:
+                results = client.get(
+                    TAXI_DATASET_ID,
+                    where=where_clause,
+                    select=select_fields,
+                    limit=per_offset,
+                    offset=ofs,
+                    order="tpep_pickup_datetime ASC",
+                )
+                if results:
+                    all_records.extend(results)
+                    day_total += len(results)
+            except Exception as e:
+                logger.error("    Error fetching %s offset %d: %s", day_str, ofs, e)
 
-        try:
-            results = client.get(
-                TAXI_DATASET_ID,
-                where=where_clause,
-                select=select_fields,
-                limit=per_month,
-            )
-            if results:
-                all_records.extend(results)
-                logger.info("    Got %d records", len(results))
-            else:
-                logger.warning("    No records returned for %s", month_start.strftime("%Y-%m"))
-        except Exception as e:
-            logger.error("    Error fetching %s: %s", month_start.strftime("%Y-%m"), e)
+        logger.info("  %s: %d records (6 offsets across the day)", day_str, day_total)
 
     client.close()
     logger.info("Fetched %d total taxi records.", len(all_records))
