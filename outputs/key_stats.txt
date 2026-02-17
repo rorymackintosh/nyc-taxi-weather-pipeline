@@ -1,0 +1,54 @@
+======================================================================
+KEY STATISTICS SUMMARY
+======================================================================
+
+Total records: 49,920
+Credit card trips (with tip data): 37,143
+Unique dates sampled: 104
+Date range: 2023-01-04 to 2023-12-30
+
+--- Average Tip % by Weather Condition ---
+                   avg_tip_pct  median_tip_pct  avg_tip_amt  avg_fare  avg_distance  trip_count
+weather_condition                                                                              
+Clear/Normal             23.92           25.37         4.39     20.70          3.76       24620
+Extreme Heat             23.78           25.65         4.43     20.85          3.84        1050
+Freezing                 24.09           25.43         3.83     17.97          3.25         364
+Heavy Rain               23.85           25.27         4.35     20.51          3.67        3536
+Light Rain               23.81           25.43         4.30     20.56          3.96        7218
+Snow                     24.49           25.93         4.11     19.19          3.69         355
+
+--- Average Tip % by Hour ---
+             avg_tip_pct  trip_count
+pickup_hour                         
+0                  23.88        4818
+3                  23.60        4455
+6                  21.74        4128
+9                  23.94        4692
+12                 24.08        4627
+15                 23.59        4612
+18                 25.11        4832
+21                 24.84        4979
+
+--- Average Tip % by Month ---
+       avg_tip_pct  trip_count
+month                         
+1            24.29        2920
+2            24.45        2875
+3            24.46        3285
+4            24.18        3219
+5            23.68        3266
+6            23.68        2955
+7            23.74        3196
+8            23.73        3202
+9            23.41        2816
+10           23.51        2938
+11           23.90        3246
+12           23.68        3225
+
+--- Weekday vs Weekend ---
+               avg_tip_pct  trip_count
+period                                
+Weekday (Wed)        24.13       18879
+Weekend (Sat)        23.65       18264
+
+======================================================================

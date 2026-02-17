@@ -462,20 +462,21 @@ def main():
     print(f"\nAll charts saved to: {os.path.abspath(OUT_DIR)}/")
 
     # =====================================================================
-    # KEY STATS SUMMARY
+    # KEY STATS SUMMARY — write to outputs/key_stats.txt
     # =====================================================================
     cc = df[(df["tip_pct"].notna())].copy()
+    stats_path = os.path.join(OUT_DIR, "key_stats.txt")
 
-    print("\n" + "=" * 70)
-    print("KEY STATISTICS SUMMARY")
-    print("=" * 70)
+    lines = []
+    lines.append("=" * 70)
+    lines.append("KEY STATISTICS SUMMARY")
+    lines.append("=" * 70)
+    lines.append(f"\nTotal records: {len(df):,}")
+    lines.append(f"Credit card trips (with tip data): {len(cc):,}")
+    lines.append(f"Unique dates sampled: {df['pickup_date'].nunique()}")
+    lines.append(f"Date range: {df['pickup_date'].min().date()} to {df['pickup_date'].max().date()}")
 
-    print(f"\nTotal records: {len(df):,}")
-    print(f"Credit card trips (with tip data): {len(cc):,}")
-    print(f"Unique dates sampled: {df['pickup_date'].nunique()}")
-    print(f"Date range: {df['pickup_date'].min().date()} to {df['pickup_date'].max().date()}")
-
-    print(f"\n--- Average Tip % by Weather Condition ---")
+    lines.append(f"\n--- Average Tip % by Weather Condition ---")
     tip_by_weather = cc.groupby("weather_condition").agg(
         avg_tip_pct=("tip_pct", "mean"),
         median_tip_pct=("tip_pct", "median"),
@@ -484,31 +485,38 @@ def main():
         avg_distance=("trip_distance", "mean"),
         trip_count=("tip_pct", "size"),
     ).round(2)
-    print(tip_by_weather.to_string())
+    lines.append(tip_by_weather.to_string())
 
-    print(f"\n--- Average Tip % by Hour ---")
+    lines.append(f"\n--- Average Tip % by Hour ---")
     tip_by_hour = cc.groupby("pickup_hour").agg(
         avg_tip_pct=("tip_pct", "mean"),
         trip_count=("tip_pct", "size"),
     ).round(2)
-    print(tip_by_hour.to_string())
+    lines.append(tip_by_hour.to_string())
 
-    print(f"\n--- Average Tip % by Month ---")
+    lines.append(f"\n--- Average Tip % by Month ---")
     tip_by_month = cc.groupby("month").agg(
         avg_tip_pct=("tip_pct", "mean"),
         trip_count=("tip_pct", "size"),
     ).round(2)
-    print(tip_by_month.to_string())
+    lines.append(tip_by_month.to_string())
 
-    print(f"\n--- Weekday vs Weekend ---")
+    lines.append(f"\n--- Weekday vs Weekend ---")
     cc["period"] = cc["is_weekend"].map({True: "Weekend (Sat)", False: "Weekday (Wed)"})
     tip_by_period = cc.groupby("period").agg(
         avg_tip_pct=("tip_pct", "mean"),
         trip_count=("tip_pct", "size"),
     ).round(2)
-    print(tip_by_period.to_string())
+    lines.append(tip_by_period.to_string())
 
-    print("\n" + "=" * 70)
+    lines.append("\n" + "=" * 70)
+
+    stats_text = "\n".join(lines)
+    with open(stats_path, "w") as f:
+        f.write(stats_text)
+
+    print(f"\nKey stats saved to: {stats_path}")
+    print(stats_text)
 
 
 if __name__ == "__main__":
