@@ -64,7 +64,7 @@ services:
     command:
       - -c
       - |
-        pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv &&
+        pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv pyspark &&
         airflow db init &&
         airflow users create \
           --username airflow \
@@ -78,7 +78,7 @@ services:
   airflow-webserver:
     <<: *airflow-common
     command: >
-      bash -c "pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv &&
+      bash -c "pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv pyspark &&
                airflow webserver --port 8080"
     ports:
       - "8080:8080"
@@ -92,7 +92,7 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     command: >
-      bash -c "pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv &&
+      bash -c "pip install sodapy google-cloud-storage pymongo[srv] pandas python-dotenv pyspark &&
                airflow scheduler"
     restart: always
 

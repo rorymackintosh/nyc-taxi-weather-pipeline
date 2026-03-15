@@ -1,23 +1,34 @@
 """
-Airflow DAG: NYC Taxi & Weather Data Pipeline (Phase 2)
+Airflow DAG: NYC Taxi & Weather Data Pipeline (Full Pipeline)
 
-This DAG orchestrates the full Phase 2 pipeline:
-  1. Download NYC Yellow Taxi Parquet files from TLC CDN
-  2. Fetch NOAA daily weather data for Central Park
-  3. Upload raw data to Google Cloud Storage
-  4. Sample taxi data and load into MongoDB Atlas
-  5. Load weather data into MongoDB Atlas
-  6. Run $lookup aggregation to create enriched_trips (data fusion)
-  7. Run aggregation to compute tip_by_weather stats
-  8. Run aggregation to compute hourly_trip_stats
+This DAG orchestrates the complete pipeline across all phases:
+
+  Phase 2 — Data Ingestion & MongoDB:
+    1. Download NYC Yellow Taxi Parquet files from TLC CDN
+    2. Fetch NOAA daily weather data for Central Park
+    3. Upload raw data to Google Cloud Storage
+    4. Sample taxi data and load into MongoDB Atlas
+    5. Load weather data into MongoDB Atlas
+    6. Run $lookup aggregation to create enriched_trips (data fusion)
+    7. Run aggregation to compute tip_by_weather stats
+    8. Run aggregation to compute hourly_trip_stats
+
+  Phase 3 — Spark Processing & ML:
+    9. Run SparkSQL queries and benchmark against MongoDB aggregations
+   10. Train Linear Regression + Random Forest models to predict tip_amount
 
 Schedule: Manual trigger (or change to "@weekly" for production).
 """
 
+import os
+import sys
+import subprocess
 from datetime import datetime, timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+
+SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), "..", "scripts")
 
 # ---------------------------------------------------------------------------
 # Default DAG arguments
@@ -32,7 +43,7 @@ default_args = {
 }
 
 # ---------------------------------------------------------------------------
-# Task callables
+# Phase 2 task callables
 # ---------------------------------------------------------------------------
 
 def task_download_taxi(**context):
@@ -131,20 +142,57 @@ def task_create_hourly_stats(**context):
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 task callables
+# ---------------------------------------------------------------------------
+
+def task_spark_sql_analysis(**context):
+    """Load data into Spark DataFrames, run SparkSQL queries, benchmark vs MongoDB."""
+    script = os.path.join(SCRIPTS_DIR, "spark_analysis.py")
+    result = subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        raise RuntimeError(f"spark_analysis.py failed (exit {result.returncode})")
+    return "SparkSQL analysis and benchmark complete"
+
+
+def task_spark_ml_modeling(**context):
+    """Train Linear Regression + Random Forest models to predict tip_amount."""
+    script = os.path.join(SCRIPTS_DIR, "run_model.py")
+    result = subprocess.run(
+        [sys.executable, script],
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        raise RuntimeError(f"run_model.py failed (exit {result.returncode})")
+    return "Spark ML modeling complete"
+
+
+# ---------------------------------------------------------------------------
 # DAG definition
 # ---------------------------------------------------------------------------
 
 with DAG(
     dag_id="nyc_taxi_weather_pipeline",
     default_args=default_args,
-    description="Download TLC taxi data + NOAA weather → GCS → MongoDB → Aggregations",
+    description=(
+        "Full pipeline: TLC taxi + NOAA weather → GCS → MongoDB → "
+        "Aggregations → SparkSQL benchmarks → ML models"
+    ),
     schedule_interval=None,
     start_date=datetime(2026, 2, 1),
     catchup=False,
-    tags=["nyc-taxi", "weather", "phase2"],
+    tags=["nyc-taxi", "weather", "phase2", "phase3", "spark", "ml"],
 ) as dag:
 
-    # --- Download / Fetch tasks (parallel) ---
+    # --- Phase 2: Download / Fetch tasks (parallel) ---
     download_taxi = PythonOperator(
         task_id="download_taxi_parquets",
         python_callable=task_download_taxi,
@@ -155,7 +203,7 @@ with DAG(
         python_callable=task_fetch_weather,
     )
 
-    # --- Upload to GCS (parallel) ---
+    # --- Phase 2: Upload to GCS (parallel) ---
     upload_taxi_gcs = PythonOperator(
         task_id="upload_taxi_to_gcs",
         python_callable=task_upload_taxi_to_gcs,
@@ -166,7 +214,7 @@ with DAG(
         python_callable=task_upload_weather_to_gcs,
     )
 
-    # --- Load into MongoDB (parallel) ---
+    # --- Phase 2: Load into MongoDB (parallel) ---
     load_taxi_mongo = PythonOperator(
         task_id="load_taxi_to_mongodb",
         python_callable=task_load_taxi_to_mongo,
@@ -177,7 +225,7 @@ with DAG(
         python_callable=task_load_weather_to_mongo,
     )
 
-    # --- Aggregation tasks (sequential) ---
+    # --- Phase 2: Aggregation tasks ---
     enrich_trips = PythonOperator(
         task_id="create_enriched_trips",
         python_callable=task_create_enriched_trips,
@@ -193,10 +241,36 @@ with DAG(
         python_callable=task_create_hourly_stats,
     )
 
+    # --- Phase 3: Spark processing ---
+    spark_analysis = PythonOperator(
+        task_id="spark_sql_analysis",
+        python_callable=task_spark_sql_analysis,
+    )
+
+    spark_ml = PythonOperator(
+        task_id="spark_ml_modeling",
+        python_callable=task_spark_ml_modeling,
+    )
+
     # --- Task dependencies ---
+    #
+    # Phase 2: Ingest → GCS → MongoDB → Aggregations
+    #
+    #   download_taxi → upload_taxi_gcs → load_taxi_mongo ─┐
+    #                                                      ├→ enrich_trips → tip_aggregates ─┐
+    #   fetch_weather → upload_weather_gcs → load_weather_mongo ─┘             hourly_stats ──┤
+    #                                                                                        │
+    # Phase 3: Spark                                                                         │
+    #                                                      spark_sql_analysis ←──────────────┤
+    #                                                              │                         │
+    #                                                              ▼                         │
+    #                                                      spark_ml_modeling ←───────────────┘
+    #
     download_taxi >> upload_taxi_gcs >> load_taxi_mongo
     fetch_weather >> upload_weather_gcs >> load_weather_mongo
 
     [load_taxi_mongo, load_weather_mongo] >> enrich_trips
 
     enrich_trips >> [tip_aggregates, hourly_stats]
+
+    [tip_aggregates, hourly_stats] >> spark_analysis >> spark_ml

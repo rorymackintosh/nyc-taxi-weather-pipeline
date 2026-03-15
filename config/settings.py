@@ -43,6 +43,7 @@ MONGO_SAMPLE_SIZE = int(os.getenv("MONGO_SAMPLE_SIZE", "700000"))
 # Collection names
 TAXI_COLLECTION = "taxi_trips"
 WEATHER_COLLECTION = "weather_daily"
+ENRICHED_COLLECTION = "enriched_trips"
 TIP_WEATHER_AGG_COLLECTION = "tip_by_weather"
 HOURLY_STATS_COLLECTION = "hourly_trip_stats"
 

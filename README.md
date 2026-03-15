@@ -1,8 +1,8 @@
 # NYC Taxi Tipping & Weather Impact Pipeline
 
-Distributed data pipeline analyzing the relationship between weather conditions and NYC taxi tipping behavior. We ingest taxi trip data and historical weather data, store them in MongoDB, and produce aggregated analytics showing how weather affects tips.
+Distributed data pipeline analyzing the relationship between weather conditions and NYC taxi tipping behavior. We ingest taxi trip data and historical weather data, store them in MongoDB, process them using Apache Spark, and develop machine learning models to predict tip amounts.
 
-Built with **Apache Airflow**, **Google Cloud Storage**, **MongoDB Atlas**, and **PySpark** (Phase 3).
+Built with **Apache Airflow**, **Google Cloud Storage**, **MongoDB Atlas**, **Apache Spark** (SparkSQL + MLlib).
 
 ---
 
@@ -35,7 +35,7 @@ Then fill in the credentials. Ask me (Rory) for the shared values:
 
 The `.env` file is gitignored so your secrets stay local.
 
-### 4. Run the full pipeline
+### 4. Run the full Phase 2 pipeline
 
 ```bash
 python scripts/run_full_pipeline.py
@@ -52,7 +52,23 @@ This does everything end-to-end:
 
 First run takes ~5 min (mostly downloading Parquet files). Subsequent runs skip the download since the files are cached locally in `data/`.
 
-### 5. Generate visualizations and stats
+### 5. Run Phase 3 Spark analysis (SparkSQL benchmark)
+
+```bash
+python scripts/spark_analysis.py
+```
+
+Loads taxi and weather data from MongoDB Atlas into Spark DataFrames, runs SparkSQL queries, and benchmarks query performance against MongoDB's aggregation framework.
+
+### 6. Run Phase 3 ML models
+
+```bash
+python scripts/run_model.py
+```
+
+Trains Linear Regression (baseline) and Random Forest models to predict tip_amount. Outputs RMSE, MAE, R² for both models with a side-by-side comparison.
+
+### 7. Generate visualizations and stats
 
 ```bash
 python scripts/generate_visualizations.py
@@ -60,7 +76,7 @@ python scripts/generate_visualizations.py
 
 Produces 8 charts in `outputs/` plus a `key_stats.txt` summary.
 
-### 6. Run MongoDB queries
+### 8. Run MongoDB queries
 
 ```bash
 python scripts/run_queries.py
@@ -105,9 +121,26 @@ NYC TLC Website                NOAA API
          v                  v
    tip_by_weather     hourly_trip_stats
    (7 groups)         (146 combos)
+         |                  |
+         +--------+---------+
+                  |
+                  v
+        Apache Spark (Phase 3)
+        ├── SparkSQL queries + MongoDB benchmark
+        └── ML: Linear Regression + Random Forest
 ```
 
-The full 38M-record dataset lives in GCS as Parquet files. We load a random 500K sample into MongoDB for aggregations and queries (fits the free tier). The `enriched_trips` collection is created temporarily for the aggregation pipelines, then dropped to save storage.
+The full 38M-record dataset lives in GCS as Parquet files. We load a random 500K sample into MongoDB for aggregations and queries (fits the free tier). The `enriched_trips` collection is created temporarily for the aggregation pipelines, then dropped to save storage. In Phase 3, Spark reads directly from MongoDB Atlas via the Spark Connector.
+
+### Airflow DAG
+
+The Airflow DAG (`nyc_taxi_weather_pipeline`) orchestrates 11 tasks across both phases:
+
+```
+download_taxi → upload_taxi_gcs → load_taxi_mongo ─┐
+                                                    ├→ enrich_trips → [tip_aggregates, hourly_stats] → spark_sql_analysis → spark_ml_modeling
+fetch_weather → upload_weather_gcs → load_weather_mongo ─┘
+```
 
 ### MongoDB Collections
 
@@ -131,6 +164,16 @@ Trips are categorized by weather condition based on daily observations:
 | Freezing | Max temp <= 32°F |
 | Clear/Normal | Everything else |
 
+### ML Model Results
+
+| Metric | Linear Regression | Random Forest | Winner |
+|--------|-------------------|---------------|--------|
+| RMSE | 3.04 | 2.47 | Random Forest |
+| MAE | 1.70 | 1.20 | Random Forest |
+| R² | 0.46 | 0.64 | Random Forest |
+
+Top features: fare_amount (38%), payment_type (35%), trip_distance (22%).
+
 ---
 
 ## Project Structure
@@ -146,7 +189,7 @@ Trips are categorized by weather condition based on daily observations:
 │   └── settings.py               # All config reads from .env
 │
 ├── dags/
-│   ├── nyc_taxi_weather_dag.py   # Airflow DAG (full pipeline)
+│   ├── nyc_taxi_weather_dag.py   # Airflow DAG (full pipeline, 11 tasks)
 │   └── utils/
 │       ├── taxi_downloader.py    # Downloads TLC Parquet files + samples for MongoDB
 │       ├── weather_fetcher.py    # Fetches weather from NOAA API
@@ -154,11 +197,18 @@ Trips are categorized by weather condition based on daily observations:
 │       └── mongo_helpers.py      # MongoDB loading + aggregation pipelines
 │
 ├── scripts/
-│   ├── run_full_pipeline.py      # One command to run everything
+│   ├── run_full_pipeline.py      # One command to run Phase 2 pipeline
+│   ├── spark_analysis.py         # Phase 3: SparkSQL queries + MongoDB benchmark
+│   ├── run_model.py              # Phase 3: Linear Regression + Random Forest ML
 │   ├── run_aggregations.py       # Run MongoDB aggregations standalone
 │   ├── run_queries.py            # Demo queries on original + aggregate data
 │   ├── generate_visualizations.py # Generate charts and stats
 │   └── verify_data.py            # Check collection status
+│
+├── notebook/
+│   ├── data_load.ipynb           # Data upload to GCS (exploratory)
+│   ├── data_cleaning.ipynb       # Data cleaning notebook (exploratory)
+│   └── data_load_dag.py          # Notebook helper script
 │
 ├── outputs/                      # Generated charts and stats
 │   ├── 01_temp_vs_tip.png
@@ -185,13 +235,14 @@ Trips are categorized by weather condition based on daily observations:
 - [x] Query data in MongoDB (both original and aggregated)
 - [x] Airflow DAG orchestrating the full pipeline
 
-## Phase 3 TODO (Task 3 — Due Mar 14)
+## Phase 3 Checklist (Task 3 — Due Mar 14)
 
-- [ ] Create Spark DataFrames from MongoDB Atlas data
-- [ ] Run SparkSQL queries over the DataFrames
-- [ ] Train ML models (Linear Regression + Random Forest) to predict tip amount
-- [ ] Benchmark MongoDB aggregation vs SparkSQL performance
-- [ ] Final report
+- [x] Create Spark DataFrames from MongoDB Atlas data
+- [x] Run SparkSQL queries over the DataFrames
+- [x] Train ML models (Linear Regression + Random Forest) to predict tip amount
+- [x] Benchmark MongoDB aggregation vs SparkSQL performance
+- [x] Airflow DAG updated to orchestrate Spark + ML tasks
+- [x] Final report
 
 ---
 
